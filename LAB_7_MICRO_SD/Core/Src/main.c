@@ -56,13 +56,26 @@ FATFS *pfs;
 FIL fil;
 FRESULT fres;
 DWORD fre_clust;
+FILINFO fno;
+DIR dir;
 uint32_t totalSpace, freeSpace;
-char buffer[100];
+//char buffer[100];
+
+// Lectura de archivos .txt
+char path[] = "0:/";
+char buffer[256];
 
 uint8_t rxData;//Recivir
-uint8_t txData = 2;//Enviar
+uint8_t txData;//Enviar
 
+char rxBuffer[100];// Buffer de uart
+uint8_t rxIndex = 0;// index de uart
+
+char File_txt[100];// Buffer de uart
 uint8_t A; //Indicador que archivo mandar.
+uint8_t saveToFileTxt = 0; // Bandera para indicar cuándo guardar en File_txt
+
+uint8_t Bandera = 0;
 
 /* USER CODE END PV */
 
@@ -123,17 +136,18 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+
 	  if (A == 1) {
-	      read_and_send_file("Link.txt");
-	      A = 0;
-	  } else if (A == 2) {
-	      read_and_send_file("Chin.txt");
-	      A = 0;
-	  } else if (A == 3) {
-	      read_and_send_file("Pica.txt");
-	      A = 0;
+		  read_files();
+		  A = 0;
 	  }
-}
+	  else if (A == 2){
+		 read_and_send_file(File_txt);
+		 Bandera = 0;
+		 A = 0;
+	  }
+
+  }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -304,24 +318,35 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 // DMA UART
+
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
     if (huart->Instance == USART2)
     {
-        if (rxData == '1')
+        if (rxData != ',') // Suponiendo que '\n' es el delimitador
         {
-            transmit_uart("Recibido 1\n");
-            A = 1;
+            rxBuffer[rxIndex++] = rxData;
+            if (rxIndex >= 100) // Evitar desbordamiento del buffer
+            {
+                rxIndex = 0;
+            }
         }
-        else if (rxData == '2')
+        else
         {
-            transmit_uart("Recibido 2\n");
-            A = 2;
-        }
-        else if (rxData == '3')
-        {
-            transmit_uart("Recibido 3\n");
-            A = 3;
+            rxBuffer[rxIndex] = '\0'; // Terminar la cadena
+            ///////////////////////////////////////////
+
+
+            // Verificar el primer carácter del buffer
+            if (rxBuffer[0] == '1') {
+                A = 1;
+            } else if (rxBuffer[0] == '2') {
+            	strcpy(File_txt, rxBuffer + 1); // Copiar desde el segundo carácter
+            	A = 2;
+            }
+
+            //////////////////////////////////////////
+            rxIndex = 0; // Reiniciar el índice para la próxima palabra
         }
 
         // Reiniciar la recepción de un nuevo dato
@@ -332,6 +357,25 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 void transmit_uart(char *data)
 {
     HAL_UART_Transmit(&huart2, (uint8_t *)data, strlen(data), HAL_MAX_DELAY);
+}
+
+void read_files(){
+	if (f_mount(&fs, "", 1) == FR_OK) {
+		// Abrir el directorio raíz
+		fres = f_opendir(&dir, path);
+		if (fres == FR_OK) {
+			while (1) {
+				fres = f_readdir(&dir, &fno); // Leer un archivo
+				if (fres != FR_OK || fno.fname[0] == 0) break; // No más archivos
+				if (strstr(fno.fname, ".txt")) { // Verificar si es un archivo .txt
+					snprintf(buffer, sizeof(buffer), "%s\r;", fno.fname);
+					transmit_uart(buffer);
+				}
+			}
+			f_closedir(&dir);
+		}
+		f_mount(NULL, "", 1); // Desmontar el sistema de archivos
+	}
 }
 
 void read_and_send_file(char *filename)
@@ -355,7 +399,7 @@ void read_and_send_file(char *filename)
     {
     	transmit_uart(buffer);
     }
-
+    transmit_uart("A");
     fres = f_close(&fil);
     if (fres != FR_OK)
     {
